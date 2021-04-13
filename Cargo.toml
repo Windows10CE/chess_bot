@@ -1,5 +1,5 @@
 [package]
-name = "serenity-test"
+name = "chess_bot"
 version = "0.1.0"
 authors = ["Aaron Robinson <aaronrobin1234@gmail.com>"]
 edition = "2018"
