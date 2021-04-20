@@ -1,21 +1,16 @@
-use serenity::{client::{Client, Context, EventHandler}, prelude::TypeMapKey};
+use serenity::{client::{Client, Context}, prelude::TypeMapKey};
 use serenity::framework::standard::{
     macros::{command, group},
     CommandResult, StandardFramework,
 };
 use serenity::model::channel::Message;
-use serenity::{
-    async_trait,
-    model::channel::ReactionType,
-};
+use serenity::model::channel::ReactionType;
 
 use std::env;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use pleco::{BitMove, Board, SQ, core::piece_move::{MoveFlag, PreMoveInfo}};
-
-use ascii::{self, AsAsciiStr, AsAsciiStrError, Chars};
+use pleco::{BitMove, Board, PieceType, SQ, core::piece_move::{MoveFlag, PreMoveInfo}};
 
 #[group]
 #[commands(ping, startchess, move_piece)]
@@ -108,33 +103,61 @@ async fn move_piece(ctx: &Context, msg: &Message) -> CommandResult {
     let map = lock.get_mut::<UserToBoard>().unwrap();
 
     if let Some(board) = map.get_mut(msg.author.id.as_u64()) {
-        let spaces: Vec<Result<Chars, AsAsciiStrError>> = msg.content.split(' ').skip(1).map(|x| x.as_ascii_str().map(|x| x.chars())).collect();
-        
-        if spaces.iter().any(|x| x.is_err()) {
-            return Ok(());
+        let spaces: Vec<Vec<char>> = msg.content.split(' ').skip(1).map(|x| x.to_uppercase().chars().filter(|y| (*y >= 'A' && *y <= 'H') || (*y >= '1' && *y <= '8')).collect()).collect();
+
+        if spaces.len() != 2 || spaces.iter().any(|x| x.len() != 2) {
+            msg.channel_id.say(ctx, "Invalid move".to_string()).await?;
         }
 
-        let spaces_u64 = spaces.iter()
-            .map(|x| x.unwrap())
-            .map(|x| {
-                let result = 0u8;
-                for y in x {
-                    if y >= 'A' && y <= 'H' {
-                        result += y.as_byte();
-                    }
+        let spaces_u8: Vec<u8> = spaces.iter().map(|space| {
+            space.iter().map(|x| {
+                let mut utf8: [u8; 4] = [0; 4];
+                x.encode_utf8(&mut utf8);
+                let result = utf8[0];
+                if result >= 65u8 && result <= 72u8 {
+                    return result - 65u8;
                 }
-            }
-        );
+                else {
+                    return (result - 49u8) * 8;
+                }
+            })
+            .sum()
+        })
+        .collect();
 
-        let valids = board.generate_moves();
+        let source = SQ::from(spaces_u8[0]);
+        let dest = SQ::from(spaces_u8[1]);
+        let source_piece = board.piece_at_sq(source);
+        let dest_piece = board.piece_at_sq(dest);
+        let distance = source.distance(dest);
+
+        let mut move_type = MoveFlag::QuietMove;
+
+        if source_piece.type_of() == PieceType::K && distance > 1 {
+            move_type = MoveFlag::Castle { king_side: dest.file_idx_of_sq() > 4 }
+        }
+        else if source_piece.type_of() == PieceType::P && ((source.rank_idx_of_sq() == 6 && dest.rank_idx_of_sq() == 7) || (source.rank_idx_of_sq() == 1 && dest.rank_idx_of_sq() == 0)) {
+            move_type = MoveFlag::Promotion { capture: dest_piece.type_of().is_some(), prom: PieceType::Q };
+        }
+        else if source_piece.type_of() == PieceType::P && distance > 1 {
+            if source.file_idx_of_sq() == dest.file_idx_of_sq() {
+                move_type = MoveFlag::DoublePawnPush;
+            }
+            else if dest_piece.type_of().is_none() {
+                move_type = MoveFlag::Capture { ep_capture: true };
+            }
+        }
+        else if dest_piece.type_of().is_some() {
+            move_type = MoveFlag::Capture { ep_capture: false };
+        }
         
         let proposed = BitMove::init(PreMoveInfo {
-            src: SQ::from("E2"),
-            dst: SQ::from("E4"),
-            flags: MoveFlag::DoublePawnPush,
+            src: source,
+            dst: dest,
+            flags: move_type,
         });
 
-        if valids.contains(&proposed) {
+        if board.legal_move(proposed) {
             board.apply_move(proposed);
 
             msg.channel_id.say(ctx, format!("```\n{}\n```", board.pretty_string())).await?;
