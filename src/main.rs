@@ -92,7 +92,7 @@ async fn startchess(ctx: &Context, msg: &Message) -> CommandResult {
     
     msg.channel_id.say(ctx, format!("```\n{}\n```", new_board.pretty_string())).await?;
 
-    map.insert(msg.author.id.as_u64().clone(), new_board);
+    map.insert(msg.channel_id.as_u64().clone(), new_board);
 
     Ok(())
 }
@@ -102,11 +102,12 @@ async fn move_piece(ctx: &Context, msg: &Message) -> CommandResult {
     let mut lock = ctx.data.write().await;
     let map = lock.get_mut::<UserToBoard>().unwrap();
 
-    if let Some(board) = map.get_mut(msg.author.id.as_u64()) {
+    if let Some(board) = map.get_mut(msg.channel_id.as_u64()) {
         let spaces: Vec<Vec<char>> = msg.content.split(' ').skip(1).map(|x| x.to_uppercase().chars().filter(|y| (*y >= 'A' && *y <= 'H') || (*y >= '1' && *y <= '8')).collect()).collect();
 
         if spaces.len() != 2 || spaces.iter().any(|x| x.len() != 2) {
             msg.channel_id.say(ctx, "Invalid move".to_string()).await?;
+            return Ok(());
         }
 
         let spaces_u8: Vec<u8> = spaces.iter().map(|space| {
@@ -128,6 +129,13 @@ async fn move_piece(ctx: &Context, msg: &Message) -> CommandResult {
         let source = SQ::from(spaces_u8[0]);
         let dest = SQ::from(spaces_u8[1]);
         let source_piece = board.piece_at_sq(source);
+        let owner = source_piece.player();
+        
+        match owner {
+            Some(player) => if player != board.turn() { msg.channel_id.say(ctx, "Invalid move".to_string()).await?; return Ok(()); }
+            None => { msg.channel_id.say(ctx, "Invalid move".to_string()).await?; return Ok(()); }
+        }
+
         let dest_piece = board.piece_at_sq(dest);
         let distance = source.distance(dest);
 
