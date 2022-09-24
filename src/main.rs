@@ -1,4 +1,4 @@
-use serenity::{client::{Client, Context}, prelude::TypeMapKey};
+use serenity::{client::{Client, Context}, prelude::{TypeMapKey, GatewayIntents}};
 use serenity::framework::standard::{
     macros::{command, group},
     CommandResult, StandardFramework,
@@ -46,7 +46,8 @@ async fn main() {
 
     // Login with a bot token from the environment
     let token = env::var("DISCORD_TOKEN").expect("token");
-    let mut client = Client::builder(token)
+    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let mut client = Client::builder(token, intents)
         // .event_handler(Handler)
         .framework(framework)
         .await
